@@ -1,5 +1,6 @@
+import os
+import psutil
 import time
-import tracemalloc
 import multiprocessing as mp
 import polars as pl
 from collections import Counter
@@ -9,22 +10,25 @@ from functools import wraps
 def profil_olcer(fonksiyon):
     @wraps(fonksiyon)
     def sarmalayici(*args, **kwargs):
-        tracemalloc.start()
-        baslangic = time.perf_counter()
+        islem = psutil.Process(os.getpid())
+        
+        # Çalışma öncesi bellek (RSS - Resident Set Size)
+        baslangic_bellek = islem.memory_info().rss
+        baslangic_zaman = time.perf_counter()
         
         sonuc = fonksiyon(*args, **kwargs)
         
-        bitis = time.perf_counter()
-        _, zirve = tracemalloc.get_traced_memory()
-        tracemalloc.stop()
+        bitis_zaman = time.perf_counter()
+        bitis_bellek = islem.memory_info().rss
         
-        sure = bitis - baslangic
-        zirve_mb = zirve / (1024 * 1024)
+        sure = bitis_zaman - baslangic_zaman
+        # Harcanan net bellek miktarını MB cinsinden hesaplıyoruz
+        zirve_mb = max(0, (bitis_bellek - baslangic_bellek) / (1024 * 1024))
         
         print(f"[{fonksiyon.__name__.upper()}]")
         print(f"Süre: {sure:.2f} saniye")
-        print(f"Zirve RAM: {zirve_mb:.2f} MB")
-        print(f"Sonuç: {sonuc}\n{'-'*40}")
+        print(f"Bellek Farkı: {zirve_mb:.2f} MB")
+        print(f"Sonuç: {sonuc}\n" + "-"*40)
         return sonuc
     return sarmalayici
 
@@ -35,7 +39,7 @@ def naif_dongu(dosya_yolu: str):
     
     # readlines() dosyayı tek seferde okuyup devasa bir liste oluşturur
     with open(dosya_yolu, "r", encoding="utf-8") as f:
-        tum_satirlar = f.readlines() 
+        tum_satirlar = f.readlines()
         
     for satir in tum_satirlar:
         parcalar = satir.split()
@@ -88,7 +92,7 @@ def multiprocessing_chunk(dosya_yolu: str, chunk_boyutu: int = 100_000):
     with mp.Pool(processes=cekirdek_sayisi) as havuz:
         for sonuc in havuz.imap_unordered(isci_fonksiyon, chunk_uretici()):
             toplam_sayac.update(sonuc)
-            
+
     return dict(toplam_sayac)
 
 # 5. YARIŞMACI 4: Polars (Rust Gücü)
@@ -101,13 +105,16 @@ def polars_yontemi(dosya_yolu: str):
         .agg(pl.len().alias("sayi"))
         .collect()
     )
+    
     # Çıktıyı standart Python sözlüğüne çevir
     return dict(zip(df["column_7"].to_list(), df["sayi"].to_list()))
+
 
 if __name__ == "__main__":
     dosya = "buyuk_log.txt"
     print("Yarışma Başlıyor...\n" + "="*40)
     
+    # Sırasıyla algoritmaları çalıştırıp profil sonuçlarını ekrana yazdır
     naif_dongu(dosya)
     generator_counter(dosya)
     multiprocessing_chunk(dosya)
